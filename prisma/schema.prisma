@@ -1,0 +1,437 @@
+// Prisma Schema for Konfam Twitter Simulator
+// Complete data models for users, posts, engagements, crises, and bank data
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER MODELS
+// ============================================================================
+
+enum UserType {
+  ORGANIC        // Real human-like behavior
+  BOT            // Automated amplification
+  INFLUENCER     // High follower count, trusted
+  KONFAM_OFFICIAL // Verified Konfam account
+}
+
+enum PersonalityType {
+  ANXIOUS        // Quick to panic, shares fear
+  SKEPTICAL      // Questions everything
+  TRUSTING       // Believes easily
+  ANALYTICAL     // Fact-checks before sharing
+  IMPULSIVE      // Shares immediately
+}
+
+model User {
+  id                String           @id @default(cuid())
+  username          String           @unique
+  displayName       String
+  bio               String?
+  avatarUrl         String?
+  verified          Boolean          @default(false)
+  userType          UserType         @default(ORGANIC)
+  
+  // Personality & Behavior Dimensions
+  personalityType   PersonalityType  @default(TRUSTING)
+  credibilityScore  Float            @default(50.0) // 0-100
+  anxietyLevel      Float            @default(50.0) // 0-100, drives panic behavior
+  shareThreshold    Float            @default(60.0) // How easily they repost
+  responseDelay     Int              @default(300)  // Seconds before engaging
+  
+  // Influence Metrics
+  followerCount     Int              @default(0)
+  followingCount    Int              @default(0)
+  influenceScore    Float            @default(1.0)  // Multiplier for viral spread
+  
+  // Network Relationships
+  posts             Post[]           @relation("AuthorPosts")
+  engagements       Engagement[]
+  followers         Follow[]         @relation("Followers")
+  following         Follow[]         @relation("Following")
+
+  // Added opposite relation for StreamRule.createdBy
+  streamRules       StreamRule[] 
+  
+  // Metadata
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  lastActiveAt      DateTime         @default(now())
+  
+  @@index([userType])
+  @@index([credibilityScore])
+  @@index([influenceScore])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  
+  follower    User     @relation("Followers", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+// ============================================================================
+// POST & ENGAGEMENT MODELS
+// ============================================================================
+
+enum PostType {
+  ORIGINAL       // New post
+  REPLY          // Response to another post
+  QUOTE_TWEET    // Quote with commentary
+  RETWEET        // Simple share
+}
+
+enum Language {
+  ENGLISH
+  PIDGIN
+  YORUBA
+  HAUSA
+  MIXED          // Code-switching
+}
+
+enum EmotionalTone {
+  PANIC
+  ANGER
+  CONCERN
+  NEUTRAL
+  REASSURING
+  FACTUAL
+}
+
+model Post {
+  id                String         @id @default(cuid())
+  content           String
+  language          Language       @default(ENGLISH)
+  emotionalTone     EmotionalTone  @default(NEUTRAL)
+  postType          PostType       @default(ORIGINAL)
+  
+  // Author & Relationships
+  authorId          String
+  author            User           @relation("AuthorPosts", fields: [authorId], references: [id], onDelete: Cascade)
+  
+  parentId          String?        // For replies and quote tweets
+  parent            Post?          @relation("PostReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies           Post[]         @relation("PostReplies")
+  
+  // Viral Mechanics
+  viralCoefficient  Float          @default(1.0)  // Base spread multiplier
+  emotionalWeight   Float          @default(0.5)  // 0-1, drives engagement
+  panicFactor       Float          @default(0.0)  // 0-1, specific to crisis posts
+  
+  // Engagement Metrics
+  likeCount         Int            @default(0)
+  retweetCount      Int            @default(0)
+  replyCount        Int            @default(0)
+  viewCount         Int            @default(0)
+  
+  // Crisis Association
+  crisisId          String?
+  crisis            Crisis?        @relation(fields: [crisisId], references: [id])
+  
+  // Misinformation Tracking
+  isMisinformation  Boolean        @default(false)
+  threatLevel       Float          @default(0.0)  // 0-1, calculated by Konfam
+  isKonfamResponse  Boolean        @default(false)
+  
+  // Engagement Records
+  engagements       Engagement[]
+
+  threat        Threat?
+  
+  // Metadata
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  
+  @@index([authorId])
+  @@index([crisisId])
+  @@index([createdAt])
+  @@index([threatLevel])
+  @@index([isKonfamResponse])
+  @@index([viralCoefficient])
+}
+
+enum EngagementType {
+  LIKE
+  RETWEET
+  REPLY
+  VIEW
+  QUOTE_TWEET
+}
+
+model Engagement {
+  id        String         @id @default(cuid())
+  type      EngagementType
+  
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  postId    String
+  post      Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime       @default(now())
+  
+  @@unique([userId, postId, type])
+  @@index([postId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// STREAM
+
+model StreamRule {
+  id          String   @id @default(cuid())
+  name        String
+  keywords    String[] // array of related terms like ["zenith bank", "@zenithbank", "zenth"]
+  createdBy   String?
+  user        User?    @relation(fields: [createdBy], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([createdBy])
+}
+
+
+// ============================================================================
+// THREAT DETECTION MODEL
+// ============================================================================
+
+model Threat {
+  id            String    @id @default(cuid())
+  postId        String    @unique
+  post          Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  // Threat Analysis
+  severity      String    // CRITICAL, HIGH, MEDIUM, LOW
+  score         Int       // 0-100
+  reasons       Json      // ["High engagement (234)", "Contains: freeze, account"]
+  
+  // Metadata
+  detectedAt    DateTime  @default(now())
+  addressed     Boolean   @default(false)
+  addressedAt   DateTime?
+  responseId    String?   // Links to Konfam's response post
+  
+  // Tracking
+  lastUpdated   DateTime  @updatedAt
+  
+  @@index([severity, addressed])
+  @@index([detectedAt])
+}
+
+// ============================================================================
+// CRISIS SIMULATION MODELS
+// ============================================================================
+
+enum CrisisType {
+  ACCOUNT_FREEZE
+  ATM_OUTAGE
+  UNAUTHORIZED_DEDUCTION
+  SYSTEM_MAINTENANCE
+  DATA_BREACH
+  GENERAL_PANIC
+}
+
+enum CrisisPhase {
+  DORMANT           // Not active
+  INITIAL_SPARK     // First posts appear
+  BOT_AMPLIFICATION // Bots amplify the message
+  ORGANIC_SPREAD    // Real users start sharing
+  PEAK_PANIC        // Maximum engagement
+  KONFAM_INTERVENTION // Konfam responds
+  SENTIMENT_SHIFT   // Opinion changes
+  RESOLUTION        // Crisis resolves
+}
+
+model Crisis {
+  id                String       @id @default(cuid())
+  type              CrisisType
+  title             String
+  description       String
+  
+  // Timeline
+  currentPhase      CrisisPhase  @default(DORMANT)
+  startedAt         DateTime?
+  endedAt           DateTime?
+  
+  // Scenario Configuration
+  targetViralRate   Float        @default(2.5)  // Posts per minute at peak
+  botAmplification  Float        @default(3.0)  // Bot activity multiplier
+  organicThreshold  Float        @default(100.0) // Engagements before organic spread
+  
+  // Impact Metrics
+  totalPosts        Int          @default(0)
+  totalEngagements  Int          @default(0)
+  peakThreatLevel   Float        @default(0.0)
+  sentimentScore    Float        @default(0.0)  // -1 to 1
+  
+  // Konfam Response Tracking
+  konfamResponseCount Int        @default(0)
+  timeToIntervention  Int?       // Seconds from start to first Konfam response
+  resolutionTime      Int?       // Seconds from intervention to resolution
+  
+  // Associated Content
+  posts             Post[]
+  
+  // Metadata
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@index([currentPhase])
+  @@index([type])
+  @@index([startedAt])
+}
+
+// ============================================================================
+// BANK DATA MODELS (Truth Source)
+// ============================================================================
+
+enum SystemStatus {
+  OPERATIONAL
+  DEGRADED
+  MAINTENANCE
+  OUTAGE
+}
+
+enum TransactionStatus {
+  COMPLETED
+  PENDING
+  FAILED
+}
+
+model BankSystemStatus {
+  id                String       @id @default(cuid())
+  
+  // Core Banking Systems
+  coreSystemStatus  SystemStatus @default(OPERATIONAL)
+  atmNetworkStatus  SystemStatus @default(OPERATIONAL)
+  mobileAppStatus   SystemStatus @default(OPERATIONAL)
+  webBankingStatus  SystemStatus @default(OPERATIONAL)
+  
+  // Operational Metrics
+  atmUptime         Float        @default(98.5)  // Percentage
+  transactionRate   Int          @default(1250)  // Per minute
+  activeAccounts    Int          @default(50000)
+  
+  // System Health
+  serverLoad        Float        @default(45.0)  // Percentage
+  responseTime      Int          @default(150)   // Milliseconds
+  errorRate         Float        @default(0.02)  // Percentage
+  
+  // Timestamps
+  timestamp         DateTime     @default(now())
+  
+  @@index([timestamp])
+}
+
+model BankTransaction {
+  id                String            @id @default(cuid())
+  accountNumber     String
+  
+  transactionType   String            // DEBIT, CREDIT, TRANSFER
+  amount            Float
+  status            TransactionStatus @default(COMPLETED)
+  
+  description       String
+  reference         String            @unique
+  
+  balanceBefore     Float
+  balanceAfter      Float
+  
+  timestamp         DateTime          @default(now())
+  
+  @@index([accountNumber])
+  @@index([timestamp])
+  @@index([status])
+}
+
+model BankAccount {
+  id                String       @id @default(cuid())
+  accountNumber     String       @unique
+  accountName       String
+  
+  accountType       String       // SAVINGS, CURRENT, FIXED_DEPOSIT
+  balance           Float
+  status            String       @default("ACTIVE") // ACTIVE, FROZEN, CLOSED
+  
+  lastTransaction   DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@index([accountNumber])
+  @@index([status])
+}
+
+model ATMLocation {
+  id                String       @id @default(cuid())
+  atmId             String       @unique
+  location          String
+  address           String
+  
+  status            SystemStatus @default(OPERATIONAL)
+  cashAvailable     Boolean      @default(true)
+  lastService       DateTime     @default(now())
+  
+  // Usage Metrics
+  dailyTransactions Int          @default(0)
+  uptime            Float        @default(99.0)
+  
+  latitude          Float?
+  longitude         Float?
+  
+  updatedAt         DateTime     @updatedAt
+  
+  @@index([status])
+  @@index([location])
+}
+
+// ============================================================================
+// ANALYTICS & METRICS
+// ============================================================================
+
+model AnalyticsSnapshot {
+  id                    String   @id @default(cuid())
+  
+  // Crisis Tracking
+  crisisId              String?
+  crisisPhase           CrisisPhase?
+  
+  // Engagement Metrics
+  totalPosts            Int
+  totalEngagements      Int
+  postsPerMinute        Float
+  engagementRate        Float
+  
+  // Sentiment Analysis
+  averageSentiment      Float    // -1 to 1
+  panicLevel            Float    // 0 to 1
+  threatLevel           Float    // 0 to 1
+  
+  // Viral Metrics
+  topPostViralCoef      Float
+  averageViralCoef      Float
+  viralPostCount        Int
+  
+  // Konfam Impact
+  konfamResponseCount   Int
+  postKonfamSentiment   Float?
+  sentimentImprovement  Float?
+  
+  timestamp             DateTime @default(now())
+  
+  @@index([crisisId])
+  @@index([timestamp])
+}
