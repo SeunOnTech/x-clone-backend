@@ -11,7 +11,6 @@ import { prisma } from '../config/database';
 import { getCacheService } from '../services/cache.service';
 import { asyncHandler, createError } from '../middleware/error-handler';
 import { TimelineResponse, CreatePostRequest, CreateEngagementRequest } from '../types';
-import { checkAndBroadcastPost } from './stream.controller';
 
 const postRepo = new PostRepository();
 const userRepo = new UserRepository();
@@ -125,8 +124,6 @@ export const createPost = asyncHandler(async (req: Request, res: Response) => {
     author: { connect: { id: data.authorId } },
     ...(data.parentId && { parent: { connect: { id: data.parentId } } }),
   });
-
-  await checkAndBroadcastPost(post);
 
   // Invalidate timeline cache
   await cache.clearPattern('timeline:*');

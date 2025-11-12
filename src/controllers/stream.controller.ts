@@ -1,125 +1,104 @@
-// ============================================================================
-// FILE 3: src/controllers/stream.controller.ts
-// Stream endpoint and management controllers
-// ============================================================================
+/**
+ * STREAM CONTROLLER (100% Type-Safe, Compatible with Your Prisma Schema)
+ */
 
-import { Request, Response } from "express";
-import { StreamService } from "../services/stream.service";
-import { findMatchingRules } from "../services/filter.service";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Post, User } from "@prisma/client";
+import { eventStream } from "../services/event-stream.service";
 
 const prisma = new PrismaClient();
 
-/**
- * GET /filtered-stream
- * Backend clients connect here for SSE streaming
- */
-export async function streamFilteredPosts(req: Request, res: Response) {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
+type PublicAuthor = Pick<User, "id" | "username" | "displayName" | "avatarUrl">;
 
-  StreamService.addClient(res);
-  res.write(`data: ${JSON.stringify({ status: "connected" })}\n\n`);
+/**
+ * Normalize text for rule matching
+ */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9@#\s]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
- * GET /api/stream/rules
- * List all active stream rules
+ * ✅ Check post content against stream rules and broadcast if matched
  */
-export async function listStreamRules(req: Request, res: Response) {
+export async function checkAndBroadcastPost(
+  post: Post & { author?: User | null }
+): Promise<void> {
   try {
-    const rules = await prisma.streamRule.findMany({
-      orderBy: { createdAt: 'desc' }
-    });
-    res.json(rules);
-  } catch (error) {
-    console.error("Error fetching stream rules:", error);
-    res.status(500).json({ error: "Failed to fetch stream rules" });
-  }
-}
+    let author: PublicAuthor | null = null;
 
-/**
- * POST /api/stream/rules
- * Create new stream rule
- * Body: { name: string, keywords: string[] }
- */
-export async function createStreamRule(req: Request, res: Response) {
-  try {
-    const { name, keywords } = req.body;
-    
-    if (!name || !Array.isArray(keywords) || keywords.length === 0) {
-      return res.status(400).json({ 
-        error: "Invalid request. Provide 'name' and 'keywords' array." 
-      });
-    }
-
-    const rule = await prisma.streamRule.create({
-      data: { name, keywords },
-    });
-    
-    res.json(rule);
-  } catch (error) {
-    console.error("Error creating stream rule:", error);
-    res.status(500).json({ error: "Failed to create stream rule" });
-  }
-}
-
-/**
- * DELETE /api/stream/rules/:id
- * Delete a stream rule
- */
-export async function deleteStreamRule(req: Request, res: Response) {
-  try {
-    const { id } = req.params;
-    
-    await prisma.streamRule.delete({
-      where: { id }
-    });
-    
-    res.json({ success: true, message: "Rule deleted" });
-  } catch (error) {
-    console.error("Error deleting stream rule:", error);
-    res.status(500).json({ error: "Failed to delete stream rule" });
-  }
-}
-
-/**
- * Helper: Check post against rules and broadcast if matched
- * Call this from your existing createPost controller
- */
-export async function checkAndBroadcastPost(post: any) {
-  try {
-    const matchedRules = await findMatchingRules(post.content);
-
-    if (matchedRules.length > 0) {
-      console.log(`🎯 Post matches ${matchedRules.length} rule(s): ${matchedRules.map(r => r.name).join(", ")}`);
-      
-      const streamPayload = {
-        post: {
-          id: post.id,
-          content: post.content,
-          language: post.language,
-          emotionalTone: post.emotionalTone,
-          author: post.author,
-          likeCount: post.likeCount || 0,
-          retweetCount: post.retweetCount || 0,
-          replyCount: post.replyCount || 0,
-          viewCount: post.viewCount || 0,
-          createdAt: post.createdAt,
-        },
-        matchedRules: matchedRules.map(r => ({
-          id: r.id,
-          name: r.name,
-          keywords: r.keywords,
-        })),
-        timestamp: new Date(),
+    if (post.author) {
+      // extract only what we need
+      author = {
+        id: post.author.id,
+        username: post.author.username,
+        displayName: post.author.displayName,
+        avatarUrl: post.author.avatarUrl,
       };
-
-      StreamService.broadcast(streamPayload);
+    } else if (post.authorId) {
+      // fallback query (safe + typed)
+      const found = await prisma.user.findUnique({
+        where: { id: post.authorId },
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          avatarUrl: true,
+        },
+      });
+      author = found ?? null;
     }
-  } catch (error) {
-    console.error("Error checking/broadcasting post:", error);
+
+    const rules = await prisma.streamRule.findMany();
+    if (!rules.length) {
+      console.log("⚠️ No StreamRules found — skipping broadcast.");
+      return;
+    }
+
+    const content = normalizeText(post.content);
+    let matchedRule: { name: string; keywords: string[] } | null = null;
+
+    for (const rule of rules) {
+      const hit = rule.keywords.some((kw) =>
+        content.includes(normalizeText(kw))
+      );
+      if (hit) {
+        matchedRule = rule;
+        break;
+      }
+    }
+
+    if (!matchedRule) {
+      console.log("ℹ️ No matching rule — post ignored.");
+      return;
+    }
+
+    const payload = {
+      id: post.id,
+      type: "post_filtered",
+      rule: matchedRule.name,
+      timestamp: new Date().toISOString(),
+      payload: {
+        content: post.content,
+        author,
+        keywordsMatched: matchedRule.keywords,
+        metadata: {
+          createdAt: post.createdAt,
+          threatLevel: post.threatLevel,
+          language: post.language,
+          tone: post.emotionalTone,
+        },
+      },
+    };
+
+    // Broadcast via SSE
+    eventStream.broadcast(payload);
+    console.log(
+      `📡 Broadcasted "${matchedRule.name}" (${eventStream.getClientCount()} client(s))`
+    );
+  } catch (err: any) {
+    console.error("❌ Error in checkAndBroadcastPost:", err.message);
   }
 }
