@@ -36,18 +36,13 @@ function createExpressApp(): Application {
 
   // CORS configuration
   app.use(cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (CORS_ORIGINS.includes(origin) || NODE_ENV === 'development') {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["*"],
+    exposedHeaders: ["*"],
+    credentials: false
   }));
+
 
   // Body parsing & compression
   app.use(express.json({ limit: '10mb' }));
