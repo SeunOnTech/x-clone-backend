@@ -97,7 +97,7 @@ export const updateUserSchema = createUserSchema.partial();
 // ============================================================================
 
 export const createPostSchema = z.object({
-  content: z.string().min(1).max(280),
+  content: z.string().min(1).max(5000),
   language: z.nativeEnum(Language).default(Language.ENGLISH),
   emotionalTone: z.nativeEnum(EmotionalTone).default(EmotionalTone.NEUTRAL),
   postType: z.nativeEnum(PostType).default(PostType.ORIGINAL),
@@ -160,7 +160,7 @@ export const updateCrisisPhaseSchema = z.object({
 
 export const deployResponseSchema = z.object({
   targetPostId: z.string().cuid(),
-  responseContent: z.string().min(1).max(280),
+  responseContent: z.string().min(1).max(5000),
   language: z.nativeEnum(Language),
   responseType: z.enum(['REPLY', 'QUOTE_TWEET']).default('REPLY')
 });

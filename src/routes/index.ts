@@ -32,7 +32,7 @@ const controller = new TwitterAPIController();
  */
 router.get(
   '/timeline',
-  validators.getTimeline,
+  //validators.getTimeline,
   timelineController.getTimeline
 );
 

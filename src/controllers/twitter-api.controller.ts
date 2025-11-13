@@ -272,7 +272,7 @@ async postTweet(req: Request, res: Response) {
 
     await initSocketClient();
 
-    if (!text || text.length > 280) {
+    if (!text || text.length > 5000) {
       return res.status(400).json({ 
         error: 'Invalid tweet text (must be 1-280 characters)' 
       });

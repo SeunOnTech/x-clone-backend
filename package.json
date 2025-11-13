@@ -7,16 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio",
-    "db:seed": "tsx src/scripts/seed-demo-data.ts",
-    "seed": "tsx src/scripts/seed-demo-data.ts",
-    "seed:fast": "tsx src/scripts/seed-demo-data.ts --fast",
     "lint": "eslint src --ext .ts",
-    "type-check": "tsc --noEmit",
-    "test:stream": "tsx src/scripts/test-filtered-stream.ts"
+    "type-check": "tsc --noEmit"
   },
   "keywords": [
     "konfam",

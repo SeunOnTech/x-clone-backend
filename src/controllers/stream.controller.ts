@@ -75,6 +75,8 @@ export async function checkAndBroadcastPost(
       return;
     }
 
+    console.log('the post', post)
+
     const payload = {
       id: post.id,
       type: "post_filtered",
