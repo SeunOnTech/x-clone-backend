@@ -99,7 +99,10 @@ export const getPost = asyncHandler(async (req: Request, res: Response) => {
  * Create new post
  */
 export const createPost = asyncHandler(async (req: Request, res: Response) => {
-  const data = req.body as CreatePostRequest;
+  const data = req.body as CreatePostRequest & {
+    authorId: string;
+    parentId?: string | null;
+  };
 
   // Validate author exists
   const author = await userRepo.findById(data.authorId);

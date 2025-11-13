@@ -23,7 +23,11 @@ export class StreamAPIController {
 
   public emitEvent = (req: Request, res: Response): void => {
     const { type, payload } = req.body;
-    if (!type) return res.status(400).json({ error: "type is required" });
+    if (!type) {
+      res.status(400).json({ error: "type is required" });
+      return;
+    }
+
 
     const event: StreamEvent = {
       id: uuidv4(),

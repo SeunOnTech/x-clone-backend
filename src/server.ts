@@ -190,8 +190,6 @@ export class KonfamServer {
     logger.info('Shutting down server gracefully...');
 
     try {
-        // Stop threat detection first
-        logger.info('1Stopping Threat Detection System...');
 
       await new Promise<void>((resolve) => {
         this.httpServer.close(() => {
